@@ -1,5 +1,9 @@
 # Repo Task Proof Loop
 
+This skill was built from [OpenClaw-RL: Train Any Agent Simply by Talking](https://arxiv.org/html/2603.10165v1) and applies its proven approach to agentic flows in a repo-local workflow.
+
+> "next-state signals are universal, and policy can learn from all of them simultaneously."
+
 Repo Task Proof Loop is a repo-local workflow skill for non-trivial coding tasks.
 
 It creates a durable task folder under `.agent/tasks/<TASK_ID>/`, installs project-scoped Codex and Claude subagents, updates `AGENTS.md` and `CLAUDE.md` with the workflow, and drives a strict implementation loop:
