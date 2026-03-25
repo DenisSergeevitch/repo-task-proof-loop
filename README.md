@@ -104,6 +104,11 @@ Unzip or copy this directory to:
 .agents/skills/repo-task-proof-loop/
 ```
 
+Or ask an agent:
+```text
+install skill https://github.com/DenisSergeevitch/repo-task-proof-loop/blob/main/README.md
+```
+
 ### Claude Code
 
 Unzip or copy this directory to:
