@@ -92,11 +92,16 @@ For users, the intended interaction stays simple: run Codex, mention `$repo-task
 ## Quick Start
 
 1. Install the skill in the repository.
-2. For the normal end-to-end flow, run `Do Task`.
-3. In Claude Code, if `init` just created or refreshed `.claude/agents/*`, do not assume those agents are immediately available in the current session.
-4. `Do Task` should reuse the matching task when it exists and initialize first when it does not.
-5. If you intentionally want init without continuing, run `scripts/task_loop.py init` directly.
-6. Validate before sign-off, but only after `init` has fully finished.
+2. For the normal flow, use the [Do Task prompt](#do-task) or mention Repo Task Proof Loop (`$repo-task-proof-loop`) and describe the task.
+3. That's it.
+
+## Claude Notes
+
+- Claude Code should normally let the main session choose the installed project agents under `.claude/agents/` automatically based on the task and their descriptions.
+- If `init` created or refreshed `.claude/agents/*` during the current Claude Code session, do not assume those refreshed agents are immediately available.
+- For this workflow, the default Claude path is to reuse the same builder child for evidence. Only fall back to a second builder in evidence-only mode if the original builder session is unavailable.
+- For this workflow, keep the Claude path flat: the main session may auto-delegate each phase, but the workflow agents themselves are not meant to spawn more agents.
+- Claude may also use TodoWrite or show a task/todo UI for multi-step work. That UI is useful for live session progress, but the canonical durable workflow state is always the repo-local artifact set under `.agent/tasks/<TASK_ID>/`.
 
 ## Codex Notes
 
@@ -178,14 +183,6 @@ Useful options:
 - `--force`
 
 With `--guides auto`, the initializer preserves existing guide files, but it also ensures `CLAUDE.md` exists whenever Claude agents are being installed and `AGENTS.md` exists whenever Codex agents are being installed.
-
-## Claude Notes
-
-- Claude Code should normally let the main session choose the installed project agents under `.claude/agents/` automatically based on the task and their descriptions.
-- If `init` created or refreshed `.claude/agents/*` during the current Claude Code session, do not assume those refreshed agents are immediately available.
-- For this workflow, the default Claude path is to reuse the same builder child for evidence. Only fall back to a second builder in evidence-only mode if the original builder session is unavailable.
-- For this workflow, keep the Claude path flat: the main session may auto-delegate each phase, but the workflow agents themselves are not meant to spawn more agents.
-- Claude may also use TodoWrite or show a task/todo UI for multi-step work. That UI is useful for live session progress, but the canonical durable workflow state is always the repo-local artifact set under `.agent/tasks/<TASK_ID>/`.
 
 ## Validation
 
