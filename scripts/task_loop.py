@@ -31,6 +31,7 @@ REQUIRED_TASK_FILES = [
 ]
 
 STATUS_VALUES = {"PASS", "FAIL", "UNKNOWN"}
+INIT_SENTINEL_FILE = ".init-in-progress"
 
 PNG_PLACEHOLDER = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -40,6 +41,10 @@ PNG_PLACEHOLDER = (
 
 MANAGED_START = "<!-- repo-task-proof-loop:start -->"
 MANAGED_END = "<!-- repo-task-proof-loop:end -->"
+CODEX_GUIDE_CANDIDATES = (
+    Path("AGENTS.override.md"),
+    Path("AGENTS.md"),
+)
 CLAUDE_GUIDE_CANDIDATES = (
     Path("CLAUDE.md"),
     Path(".claude") / "CLAUDE.md",
@@ -116,14 +121,14 @@ def path_chain(repo_root: Path, current: Path) -> list[Path]:
 
 def guidance_candidates_for_directory(directory: Path) -> list[Path]:
     candidates: list[Path] = []
-    for rel_path in (Path("AGENTS.md"), Path("CLAUDE.md"), Path(".claude") / "CLAUDE.md"):
+    for rel_path in (*CODEX_GUIDE_CANDIDATES, Path("CLAUDE.md"), Path(".claude") / "CLAUDE.md"):
         candidate = directory / rel_path
         if candidate.exists():
             candidates.append(candidate)
 
     rules_dir = directory / ".claude" / "rules"
     if rules_dir.is_dir():
-        for candidate in sorted(rules_dir.glob("*.md")):
+        for candidate in sorted(path for path in rules_dir.rglob("*.md") if path.is_file()):
             if candidate.is_file():
                 candidates.append(candidate)
 
@@ -157,6 +162,23 @@ def render_template(text: str, mapping: dict[str, str]) -> str:
 
 def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def init_sentinel_path(task_dir: Path) -> Path:
+    return task_dir / INIT_SENTINEL_FILE
+
+
+def mark_init_in_progress(task_dir: Path) -> None:
+    sentinel = init_sentinel_path(task_dir)
+    sentinel.write_text(f"{utc_now_iso()}\n", encoding="utf-8")
+
+
+def clear_init_in_progress(task_dir: Path) -> None:
+    sentinel = init_sentinel_path(task_dir)
+    try:
+        sentinel.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def has_managed_block(path: Path) -> bool:
@@ -426,28 +448,31 @@ def cmd_init(args: argparse.Namespace) -> int:
     task_id = validate_task_id(args.task_id)
     task_dir = repo_root / ".agent" / "tasks" / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
+    mark_init_in_progress(task_dir)
+    try:
+        context = template_context(task_id, repo_root, current, args.task_file, args.task_text)
+        created_files = install_task_files(task_dir, context, force=args.force)
 
-    context = template_context(task_id, repo_root, current, args.task_file, args.task_text)
-    created_files = install_task_files(task_dir, context, force=args.force)
+        installed_agents: list[str] = []
+        if args.install_subagents in {"both", "codex"}:
+            installed_agents.extend(install_codex_agents(repo_root))
+        if args.install_subagents in {"both", "claude"}:
+            installed_agents.extend(install_claude_agents(repo_root))
 
-    installed_agents: list[str] = []
-    if args.install_subagents in {"both", "codex"}:
-        installed_agents.extend(install_codex_agents(repo_root))
-    if args.install_subagents in {"both", "claude"}:
-        installed_agents.extend(install_claude_agents(repo_root))
+        guide_actions = update_guides(repo_root, args.guides, args.install_subagents)
 
-    guide_actions = update_guides(repo_root, args.guides, args.install_subagents)
-
-    result = {
-        "repo_root": str(repo_root),
-        "task_id": task_id,
-        "task_dir": str(task_dir),
-        "created_or_overwritten_task_files": created_files,
-        "installed_or_refreshed_subagent_files": installed_agents,
-        "guide_file_actions": guide_actions,
-    }
-    print(json.dumps(result, indent=2))
-    return 0
+        result = {
+            "repo_root": str(repo_root),
+            "task_id": task_id,
+            "task_dir": str(task_dir),
+            "created_or_overwritten_task_files": created_files,
+            "installed_or_refreshed_subagent_files": installed_agents,
+            "guide_file_actions": guide_actions,
+        }
+        print(json.dumps(result, indent=2))
+        return 0
+    finally:
+        clear_init_in_progress(task_dir)
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
@@ -458,9 +483,15 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     missing = [str(task_dir / rel) for rel in REQUIRED_TASK_FILES if not (task_dir / rel).exists()]
     errors: list[str] = []
+    init_in_progress = init_sentinel_path(task_dir).exists()
 
     if not task_dir.exists():
         errors.append(f"Task directory does not exist: {task_dir}")
+    elif init_in_progress:
+        errors.append(
+            f"Task initialization is still in progress: {init_sentinel_path(task_dir)}. "
+            "Rerun validate after init completes."
+        )
 
     evidence_path = task_dir / "evidence.json"
     verdict_path = task_dir / "verdict.json"
@@ -484,6 +515,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         "repo_root": str(repo_root),
         "task_id": task_id,
         "task_dir": str(task_dir),
+        "init_in_progress": init_in_progress,
         "valid": valid,
         "missing_files": missing,
         "errors": errors,
@@ -503,6 +535,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         "task_id": task_id,
         "task_dir": str(task_dir),
         "exists": task_dir.exists(),
+        "init_in_progress": init_sentinel_path(task_dir).exists(),
         "required_files_present": {},
         "evidence_overall_status": None,
         "verdict_overall_status": None,

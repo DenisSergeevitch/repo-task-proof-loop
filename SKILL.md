@@ -21,7 +21,7 @@ When the examples below mention `scripts/task_loop.py`, that path is relative to
 1. Initializes a strict repo-local task folder under `.agent/tasks/<TASK_ID>/`
 2. Seeds or updates the required artifact files
 3. Installs project-scoped Codex and Claude subagent templates into `.codex/agents/` and `.claude/agents/`
-4. Updates `AGENTS.md` and the repo's Claude guide file (`CLAUDE.md` or `.claude/CLAUDE.md`) with a managed block that explains the workflow
+4. Updates the repo-root `AGENTS.md` Codex baseline plus the repo's Claude guide file (`CLAUDE.md` or `.claude/CLAUDE.md`) with a managed block that explains the workflow
 5. Guides the agent through a strict loop:
    - spec freeze
    - builder implementation
@@ -50,7 +50,7 @@ Treat the following words as commands when the user invokes this skill:
 - `status <TASK_ID>`: summarize current artifact status
 
 If the user does not supply a command, infer the next step from repo state:
-- If the task folder does not exist, do `init` only. Do not start `freeze`, `build`, `evidence`, `verify`, `fix`, or subagent work until `init` succeeds and `.agent/tasks/<TASK_ID>/spec.md` exists.
+- If the task folder does not exist, run `init` first. If the user clearly wants initialization only, stop there. Otherwise, after `init` succeeds and `.agent/tasks/<TASK_ID>/spec.md` exists, continue by re-evaluating repo state in the same turn. Do not overlap `init` with `freeze`, `build`, `evidence`, `verify`, `fix`, `validate`, `status`, or subagent work.
 - If `spec.md` is missing or placeholder-only, do `freeze`
 - If implementation is not yet complete, do `build`
 - If evidence is stale or missing, do `evidence`
@@ -80,32 +80,69 @@ The initializer will:
 - install project-scoped subagent files
 - insert or refresh managed workflow blocks in `AGENTS.md` and the repo's Claude guide file
 
+For Codex, the initializer keeps its managed workflow block in the repo-root `AGENTS.md`. Codex also supports `AGENTS.override.md` and configured fallback guide filenames; nested files closer to the code still take precedence, and this skill intentionally does not overwrite them.
+If `init` creates or rewrites `AGENTS.md` during a running Codex session, start a new Codex session before relying on the updated instructions. Codex snapshots project-doc guidance at session start.
+
 For Claude Code, the initializer keeps its managed workflow block in the repo-root `CLAUDE.md`. Claude Code also supports `.claude/CLAUDE.md`, `.claude/rules/*.md`, and `CLAUDE.local.md`, but this skill treats root `CLAUDE.md` as the primary project guide because Claude surfaces it directly.
 
-In Claude Code, if `init` just wrote or refreshed `.claude/agents/*` during a running session, start a new Claude Code session before expecting those updated agents to appear.
+In Claude Code, if `init` just wrote or refreshed `.claude/agents/*` during the current session, do not assume those updated agents are already available mid-session.
 
-Treat `init` as a serial prerequisite. Never overlap it with `freeze`, `build`, `evidence`, `verify`, `fix`, or child-agent spawning.
+Treat `init` as a serial prerequisite. Never overlap it with `freeze`, `build`, `evidence`, `verify`, `fix`, `validate`, `status`, or child-agent spawning.
 
 ## Heavy-task default workflow
 
-For large tasks, prefer subagents when the product supports them.
+For large tasks, keep the user-facing request simple. In Codex, continue serially unless the user explicitly asks for delegation or parallel agent work; after that authorization, the skill can choose the internal child setup automatically when the current product surface supports delegation and the task shape warrants it.
 
-### Preferred sequence
+### Preferred delegated sequence
 
 1. Run `init <TASK_ID>` if needed. Wait for it to finish, then confirm `.agent/tasks/<TASK_ID>/spec.md` and the repo-local task structure exist before continuing.
 2. Only after `init` completes, spawn exactly one spec-freezer subagent and wait for it
 3. Spawn exactly one builder subagent and let it implement
 4. Continue with the same builder session for evidence packing
 5. Spawn exactly one fresh verifier subagent and wait for it
-6. If verdict is not `PASS`, spawn exactly one fresh fixer subagent
+6. If verdict is not `PASS`, spawn exactly one fixer subagent
 7. Spawn one fresh verifier subagent again
 8. Repeat steps 6-7 until the verifier returns `PASS` or the user stops the loop
 
+### Codex adaptive fan-out
+
+Use this only after the user has explicitly authorized Codex delegation and the task is broad enough to benefit from bounded parallel work. Use the simpler serial sequence above for narrow tasks.
+
+Good fits:
+
+- multiple independent codebase questions must be answered before the spec is stable
+- implementation can be split into disjoint write scopes
+- proof requires several independent read-only checks across different surfaces
+
+Codex pattern:
+
+1. `init` stays serial.
+2. If the task is still ambiguous, fan out up to 3 built-in `explorer` children in parallel. Give each one a single question, subsystem, or path scope. Wait for them, then freeze the spec.
+3. Spawn one spec-freezer child and wait for it.
+4. Spawn one `task-builder` child as the integration owner.
+5. If implementation splits cleanly, the parent may also spawn bounded built-in `worker` children in parallel. Each worker must have explicit file or module ownership and must not write `evidence.md`, `evidence.json`, `verdict.json`, or `problems.md`.
+6. Use `send_input` or the equivalent follow-up surface to keep the integration builder alive for evidence packing. The builder remains the single owner of the evidence bundle.
+7. If extra proof is needed, the parent may fan out a small bounded set of read-only `explorer` children to rerun disjoint checks or inspect separate proof gaps in parallel. Those children may report commands, outputs, and findings, but they do not write `verdict.json`.
+8. Run exactly one fresh verifier child for each verify pass.
+
 ### Platform behavior
 
-- In Codex, explicitly ask for subagents. Do not assume they spawn automatically.
-- In Claude Code, prefer the installed project subagents from `.claude/agents/`. Reuse the same builder child for the evidence step by default. Only run a fresh builder in evidence-only mode if the original builder session is unavailable or you intentionally discarded it. If `init` just refreshed `.claude/agents/*` during a running Claude Code session, start a new session before relying on the updated agents. Use `/agents` to inspect the available Claude agents, and use `claude --agent <name>` only when you intentionally want a single-agent main-thread session instead of the parent-orchestrated proof loop.
-- In Claude Code, keep the orchestration flat: the parent session should select each role directly instead of asking one custom task agent to spawn another.
+- In Codex, keep the normal path serial and auto-mode-first after `init`. Avoid surfacing delegation internals unless they materially affect the work.
+- In Codex, spawn bounded subagents only when the user explicitly asks for sub-agents, delegation, or parallel agent work.
+- In Codex, once delegation is authorized, the skill may choose the matching child roles and whether to stay one-child-at-a-time or use bounded fan-out. The user should not need to name specific child roles or slash commands.
+- In Codex, child spawning is still an explicit parent-orchestrator action. If the current Codex surface blocks delegation, say so briefly only when it materially affects the work, then continue serially.
+- In Codex, keep the task tree shallow. The parent session should spawn research, builder, fixer, and verifier children directly instead of asking one custom task child to orchestrate more children.
+- In Codex, once delegation is authorized, choose between one-child-at-a-time delegation and bounded fan-out from the frozen spec, repo shape, and current delegation surface. Keep `init`, evidence ownership, and every verifier pass serialized either way.
+- In Codex, keep helper fan-out modest and wave-based. Prefer up to 3 parallel helper children at once, wait for that wave to finish, then decide the next phase.
+- In Codex, built-in `explorer` is the first choice for read-only repo discovery and proof probes. Built-in `worker` is appropriate for bounded disjoint implementation or check reruns when you can assign explicit ownership.
+- In Codex, reuse the live builder child for evidence packing by sending it a follow-up instruction. Verifier passes must use a fresh child or fresh session; do not satisfy verifier freshness by resuming an earlier verifier. Builder and fixer children can be reused or resumed when you intentionally want that context back.
+- In Codex, inspect the current child-thread list before reusing or resuming a child. Use `/agent` in Codex CLI or any equivalent child-thread inventory surface available in the current Codex product surface.
+- In Codex, the plan/todo checklist UI from `update_plan` is optional session guidance only. It is useful for live progress display, but it is not the source of truth for this workflow.
+- In Claude Code, the skill should decide whether to stay on the main thread or let the main Claude session auto-delegate the current phase to a matching built-in or project subagent after `init`. The user should not need to request a specific Claude subagent or delegation mode separately.
+- In Claude Code, TodoWrite or the visible task/todo UI is optional session-scoped progress display only. It can help with live tracking in the current session, but it is not the source of truth for this workflow.
+- In Claude Code, prefer the installed project subagents from `.claude/agents/`, with descriptions written as proactive trigger conditions for the matching proof-loop phase. Claude's main session routes by the task request, subagent descriptions, and current context, so keep each phase prompt clear in natural language. Reuse the same builder child for the evidence step by default. Only run a fresh builder in evidence-only mode if the original builder session is unavailable or you intentionally discarded it. If `init` just refreshed `.claude/agents/*` during the current Claude session, fall back to the main thread or already-visible agents instead of assuming the refreshed ones are available immediately.
+- In Claude Code, keep the orchestration flat: main-session auto-delegation is fine, but the proof-loop workflow agents themselves are leaf roles. The parent session should own the proof-loop phase transitions instead of asking one custom task agent to spawn another.
+- In Claude Code, the canonical durable state is always the repo-local artifact set under `.agent/tasks/<TASK_ID>/`, especially `spec.md`, `evidence.md`, `evidence.json`, `verdict.json`, and `problems.md`.
 - If subagents are unavailable, preserve the same role separation across separate sessions or clear mode changes in the current session.
 
 Use the exact role prompts from `references/COMMANDS.md`.
@@ -150,6 +187,7 @@ Do not claim overall `PASS` in the evidence bundle unless every acceptance crite
 ## Fresh verification requirements
 
 The verifier must be a fresh session or fresh subagent.
+In Codex, do not satisfy this requirement by resuming a prior verifier child.
 
 The verifier must judge the current repository state and current rerun results, not the builder narrative.
 
@@ -195,17 +233,23 @@ Before claiming the workflow is correctly initialized or the artifact set is com
 scripts/task_loop.py validate --task-id <TASK_ID>
 ```
 
+Run `validate` only after `init` has fully finished. If it reports initialization in progress, wait and rerun it instead of treating that result as stable task failure.
+
 For a quick summary:
 
 ```bash
 scripts/task_loop.py status --task-id <TASK_ID>
 ```
 
+Run `status` only after `init` has fully finished when you need stable task state. If it reports `init_in_progress: true`, treat that as a retry-later condition.
+
 ## Guardrails
 
 - Keep `.agent/tasks/<TASK_ID>/` inside the repo
+- Treat the Codex todo/checklist UI as ephemeral progress only; the durable workflow state lives in `.agent/tasks/<TASK_ID>/`
 - Never claim task completion unless every acceptance criterion is `PASS`
 - Separate evaluator and fixer roles
+- Keep Codex fan-out shallow and bounded. Parallel helpers may inform the proof loop, but one builder still owns evidence and one fresh verifier still owns verdict.
 - Keep the verifier fresh
 - Prefer the smallest defensible diffs during fixes
 - Preserve existing user guidance outside the managed blocks in `AGENTS.md` and the repo's chosen Claude guide file

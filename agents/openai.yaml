@@ -1,6 +1,6 @@
 interface:
   display_name: "Repo Task Proof Loop"
   short_description: "Init repo-local task artifacts, install role-specific subagents, and drive spec → build → evidence → verify → fix loops."
-  default_prompt: "Spawn subagents and use $repo-task-proof-loop to initialize this repository for the repo-local spec -> build -> evidence -> verify -> fix workflow, then derive or find task IDs later from task descriptions as needed."
+  default_prompt: "Use $repo-task-proof-loop to initialize or inspect the matching repo-local task first. Treat init as a serial prerequisite. Do not run validate or status until init has fully finished. After init succeeds and .agent/tasks/<TASK_ID>/spec.md exists, freeze the spec before coding. In Codex, keep the normal path serial and auto-mode-first. Spawn child agents only if the user explicitly asks for sub-agents, delegation, or parallel agent work; once that authorization exists, choose the appropriate role, explorer, or worker children from the frozen spec, repo shape, and current delegation surface, keep one integration builder responsible for evidence, inspect existing child threads before reuse or resume, and keep every verifier pass fresh."
 policy:
   allow_implicit_invocation: false

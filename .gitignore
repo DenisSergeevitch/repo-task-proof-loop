@@ -2,3 +2,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.agent/
+.codex/
+.claude/
+.idea/
