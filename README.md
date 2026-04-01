@@ -87,36 +87,13 @@ For all prompts, replace `...` with either `Task file: <path/to/task-file.md>` o
 
 This skill is intentionally proof-first, so `init` always comes before build.
 
-For users, the intended interaction stays simple: run Codex, mention `$repo-task-proof-loop`, and describe the task. Use `Do Task` for the normal end-to-end flow; it can initialize first when needed, keep the phase cues clear enough for Claude-style auto-delegation, and still lets the skill choose serial, subagent, or bounded parallel execution internally for Codex and other agents.
+For users, the intended interaction stays simple: run Codex, mention `$repo-task-proof-loop`, and describe the task.
 
 ## Quick Start
 
 1. Install the skill in the repository.
 2. For the normal flow, use the [Do Task prompt](#do-task) or mention Repo Task Proof Loop (`$repo-task-proof-loop`) and describe the task.
 3. That's it.
-
-## Claude Notes
-
-- Claude Code should normally let the main session choose the installed project agents under `.claude/agents/` automatically based on the task and their descriptions.
-- If `init` created or refreshed `.claude/agents/*` during the current Claude Code session, do not assume those refreshed agents are immediately available.
-- For this workflow, the default Claude path is to reuse the same builder child for evidence. Only fall back to a second builder in evidence-only mode if the original builder session is unavailable.
-- For this workflow, keep the Claude path flat: the main session may auto-delegate each phase, but the workflow agents themselves are not meant to spawn more agents.
-- Claude may also use TodoWrite or show a task/todo UI for multi-step work. That UI is useful for live session progress, but the canonical durable workflow state is always the repo-local artifact set under `.agent/tasks/<TASK_ID>/`.
-
-## Codex Notes
-
-- The initializer manages the repo's `AGENTS.md` block directly. Use Codex CLI `/init` only if you want Codex to draft a generic `AGENTS.md` outside this workflow.
-- If `init` creates or rewrites `AGENTS.md` during a running Codex session, start a new Codex session before relying on the updated instructions.
-- Do not run `validate` or `status` in parallel with `init`. Wait for `init` to finish, then inspect the seeded files.
-- Root `AGENTS.md` is the repo-wide baseline for this skill. Nested `AGENTS.override.md` or `AGENTS.md` files closer to the files you touch still take precedence.
-- In Codex, the default loop is still flat: spawn one role child at a time when that is enough, reuse the live builder child for evidence via follow-up instructions, and use a fresh verifier child on every verify pass. A fixer can be fresh by choice; freshness is only required for the verifier.
-- For broad Codex tasks, bounded fan-out is available only after the user explicitly asks for delegation or parallel agent work. Once authorized, the skill can choose the child roles and whether bounded fan-out is warranted; users do not need to name specific subagents or manual slash commands.
-- Keep Codex helper fan-out modest and wave-based. Prefer up to 3 parallel helper children at once, then wait before moving to the next phase.
-- Keep the Codex task tree shallow even in the broader-task fan-out path. The parent session should orchestrate all children directly, one integration builder should own `evidence.md` and `evidence.json`, and one fresh verifier should own `verdict.json`.
-- Before reusing or resuming a Codex child, inspect the current child-thread list with `/agent` in the CLI or the equivalent child-thread inventory surface exposed by the current Codex product surface.
-- The Codex todo/checklist UI comes from `update_plan`. It is useful for live progress display, but it is session-scoped and not the durable state for this workflow.
-- Codex CLI surfaces such as `/agent`, `/status`, and `/review` are operator tools, not prerequisites for normal use of this workflow.
-- The guidance-source list seeded into `spec.md` is a workflow input list, not a claim about Codex automatic guide loading. Codex natively auto-loads in-scope `AGENTS.override.md`, `AGENTS.md`, and any configured fallback filenames.
 
 ## Helper Script
 
