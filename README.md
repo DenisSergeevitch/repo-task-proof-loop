@@ -2,6 +2,8 @@
 
 # Repo Task Proof Loop
 
+[![AgentShield Security](https://merx.help/badge/A+.svg)](https://merx.help/shield)
+
 This skill was built from [OpenClaw-RL: Train Any Agent Simply by Talking](https://arxiv.org/html/2603.10165v1) and applies its proven approach to agentic flows in a repo-local workflow.
 
 > "next-state signals are universal, and policy can learn from all of them simultaneously."
